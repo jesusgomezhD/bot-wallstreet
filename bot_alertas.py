@@ -133,11 +133,10 @@ class App:
         tk.Button(fa, text="+ Agregar alerta", command=self.agregar_alerta,
                   bg="#d4edda").pack(side="left", padx=6)
 
-        # 3) Mis alertas
-        tk.Label(f, text="3) Mis alertas", font=("Arial", 10, "bold")).pack(anchor="w", pady=(4, 0))
-        self.alertas_txt = scrolledtext.ScrolledText(f, height=7, font=("Consolas", 9))
-        self.alertas_txt.pack(fill="x")
-        self.alertas_txt.config(state="disabled")
+        # 3) Mis alertas (activas: cada una con su boton borrar)
+        tk.Label(f, text="3) Mis alertas activas", font=("Arial", 10, "bold")).pack(anchor="w", pady=(4, 0))
+        self.alertas_frame = tk.Frame(f)
+        self.alertas_frame.pack(fill="x")
 
         # Botones
         bb = tk.Frame(f)
@@ -234,18 +233,24 @@ class App:
 
     def refrescar_alertas(self):
         reglas = parse_alertas(self.cfg.get("alertas", ""))
+        for w in self.alertas_frame.winfo_children():
+            w.destroy()
         grupos = {}
         for i, (s, o, m) in enumerate(reglas):
             grupos.setdefault(s, []).append((i, f"{s}{o}{m:g}"))
-        self.alertas_txt.config(state="normal")
-        self.alertas_txt.delete("1.0", "end")
         if not grupos:
-            self.alertas_txt.insert("end", "(sin alertas: solo aviso auto ±10% del día)\n")
+            tk.Label(self.alertas_frame, text="(sin alertas con precio: solo aviso auto)",
+                     fg="gray", font=("Arial", 9)).pack(anchor="w")
+            return
         for t in sorted(grupos):
-            self.alertas_txt.insert("end", f"[{t}]\n")
+            tk.Label(self.alertas_frame, text=f"[{t}]",
+                     font=("Arial", 9, "bold")).pack(anchor="w")
             for i, txt in grupos[t]:
-                self.alertas_txt.insert("end", f"  • {txt}\n")
-        self.alertas_txt.config(state="disabled")
+                fila = tk.Frame(self.alertas_frame)
+                fila.pack(fill="x", padx=12)
+                tk.Label(fila, text=f"• {txt}", font=("Consolas", 9)).pack(side="left")
+                tk.Button(fila, text="Borrar alerta", fg="red",
+                          command=lambda j=i: self.quitar_alerta(j)).pack(side="right")
 
     # ----- historial -----
     def ver_historial(self):
