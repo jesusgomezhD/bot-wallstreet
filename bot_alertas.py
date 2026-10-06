@@ -189,12 +189,37 @@ def enviar_correo(cfg, asunto, cuerpo):
         s.sendmail(cfg["gmail_remitente"], [cfg["correo_destino"]], msg.as_string())
     return True, "enviado"
 
+# ---------- GRUPOS DE TICKERS ----------
+GRUPOS = [
+    ("ACCIONES USA", ["MU","META","MRNA","SPY","QQQ","COST","AMD","CSCO","TSLA","SPCX","AAPL",
+     "MSFT","NVDA","AMZN","GOOGL","AVGO","NFLX","PLTR","INTC","QCOM","INTU","AMGN","BKNG",
+     "ADBE","MELI","ARM","APP","ABBV","JPM","V","XOM","UNH","MA","JNJ","WMT","PG","ORCL","HD",
+     "BAC","CRM","KO","MRK","DIS","LLY","PEP","TMO","ABT","ACN","AXP","BA","CAT","CVX","DHR",
+     "GE","GS","HON","IBM","MCD","MS","NEE","NKE","NOW","PFE","RTX","SBUX","T","TXN","UPS",
+     "VZ","DIA","IWM","SHOP","SOFI","PYPL","UBER","GILD","DELL","ANET","PANW","CRWD"]),
+    ("INDICES", [("SPY","S&P 500 ETF"),("QQQ","Nasdaq 100 ETF"),("DIA","Dow Jones ETF"),
+     ("IWM","Russell 2000"),("^GSPC","S&P 500 indice"),("^DJI","Dow Jones indice"),
+     ("^IXIC","Nasdaq indice"),("^VIX","Volatilidad")]),
+    ("FOREX", [("EUR/USD","Euro-Dolar"),("GBP/USD","Libra-Dolar"),("USD/JPY","Dolar-Yen"),
+     ("USD/COP","Dolar-Peso COL"),("USD/MXN","Dolar-Peso MEX"),("USD/BRL","Dolar-Real"),
+     ("AUD/USD","Australiano-Dolar"),("USD/CAD","Dolar-Canadiense"),("USD/CHF","Dolar-Franco"),
+     ("EUR/GBP","Euro-Libra")]),
+    ("ORO Y MATERIAS", [("GLD","Oro"),("SLV","Plata"),("PPLT","Platino"),
+     ("USO","Petroleo WTI"),("BNO","Petroleo Brent"),("UNG","Gas natural")]),
+]
+
+def _simbolo(item):
+    return item[0] if isinstance(item, tuple) else item
+
+def _texto(item):
+    return f"{item[0]}  {item[1]}" if isinstance(item, tuple) else item
+
 # ---------- APP ----------
 class App:
     def __init__(self, root):
         self.root = root
         root.title("Bot Wall Street - Alertas | En manos de Dios")
-        root.geometry("620x640")
+        root.geometry("660x800")
         self.cfg = load_config()
         self.corriendo = False
         self.avisados = set()
@@ -218,6 +243,62 @@ class App:
         campo("3) Clave de aplicacion Gmail (no tu clave normal):", "gmail_clave_app", show="*")
         campo("4) Tickers que te interesan (separados por coma):", "tickers")
         tk.Label(f, text="Ej: AAPL, SPY, QQQ, NVDA, EUR/USD", fg="gray", font=("Arial", 8)).pack(anchor="w")
+        tk.Label(f, text="4b) O elige por grupos (clic para desplegar):", font=("Arial", 9, "bold")).pack(anchor="w", pady=(4,0))
+        self._grupos = {}
+        for nombre, items in GRUPOS:
+            cab = tk.Button(f, text=f"▶ {nombre} ({len(items)})", anchor="w",
+                            command=lambda n=nombre: self._grupo_toggle(n))
+            cab.pack(fill="x")
+            box = tk.Frame(f)
+            self._grupos[nombre] = {"items": items, "mostrados": list(items),
+                                    "frame": box, "btn": cab, "abierto": False}
+            busc = tk.Entry(box, width=70)
+            busc.pack(fill="x")
+            busc.bind("<KeyRelease>", lambda e, n=nombre: self._grupo_filtrar(n))
+            self._grupos[nombre]["busc"] = busc
+            lb = tk.Listbox(box, selectmode="multiple", height=6, exportselection=False)
+            for it in items:
+                lb.insert("end", _texto(it))
+            lb.pack(fill="x")
+            self._grupos[nombre]["lista"] = lb
+            tk.Button(box, text=f"+ Agregar seleccionados al campo",
+                      command=lambda n=nombre: self._grupo_agregar(n)).pack(anchor="e")
+
+    def _grupo_toggle(self, nombre):
+        g = self._grupos[nombre]
+        g["abierto"] = not g["abierto"]
+        if g["abierto"]:
+            g["frame"].pack(fill="x")
+            g["btn"].config(text=f"▼ {nombre} ({len(g['items'])})")
+        else:
+            g["frame"].pack_forget()
+            g["btn"].config(text=f"▶ {nombre} ({len(g['items'])})")
+
+    def _grupo_filtrar(self, nombre):
+        g = self._grupos[nombre]
+        q = g["busc"].get().strip().upper()
+        lb = g["lista"]
+        lb.delete(0, "end")
+        g["mostrados"] = []
+        for it in g["items"]:
+            if q in _texto(it).upper():
+                lb.insert("end", _texto(it))
+                g["mostrados"].append(it)
+
+    def _grupo_agregar(self, nombre):
+        g = self._grupos[nombre]
+        sel = [_simbolo(g["mostrados"][i]) for i in g["lista"].curselection()
+               if i < len(g["mostrados"])]
+        if not sel:
+            self.msg(f"{nombre}: marca tickers en la lista primero.")
+            return
+        actual = [t.strip().upper() for t in self.entries["tickers"].get().split(",") if t.strip()]
+        for s in sel:
+            if s.upper() not in actual:
+                actual.append(s.upper())
+        self.entries["tickers"].delete(0, "end")
+        self.entries["tickers"].insert(0, ",".join(actual))
+        self.msg(f"{nombre}: {len(sel)} agregados.")
         campo("5) Avisame cuando (TICKER>precio o TICKER<precio):", "alertas")
         tk.Label(f, text="Ej: AAPL>250, SPY<500, EUR/USD>1.10", fg="gray", font=("Arial", 8)).pack(anchor="w")
         campo("Finnhub API Key (gratis, para forex y acciones):", "finnhub_key")
