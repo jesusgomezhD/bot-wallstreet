@@ -35,7 +35,11 @@ DEFAULTS = {
     "alpaca_key": "",
     "alpaca_secret": "",
     "intervalo_seg": 60,
+    "umbral_pct": 2,
+    "github_token": "",
 }
+
+NUBE_FILE = os.path.join(BASE, "config_nube.json")
 
 def load_config():
     if os.path.exists(CONFIG_FILE):
@@ -195,12 +199,15 @@ class App:
         campo("Alpaca API Key (gratis, acciones tiempo real):", "alpaca_key")
         campo("Alpaca Secret:", "alpaca_secret", show="*")
         campo("Revisar cada X segundos:", "intervalo_seg")
+        campo("6) Umbral auto % (avisa si sube/baja esto en el dia):", "umbral_pct")
+        campo("GitHub token (solo este PC, para subir a nube):", "github_token", show="*")
 
         btns = tk.Frame(f)
         btns.pack(pady=8)
         tk.Button(btns, text="💾 Guardar", command=self.guardar, width=12).pack(side="left", padx=4)
-        tk.Button(btns, text="▶ Iniciar", command=self.iniciar, width=12, bg="#d4edda").pack(side="left", padx=4)
-        tk.Button(btns, text="⏹ Detener", command=self.detener, width=12, bg="#f8d7da").pack(side="left", padx=4)
+        tk.Button(btns, text="☁ Subir a nube", command=self.subir_nube, width=13, bg="#cce5ff").pack(side="left", padx=4)
+        tk.Button(btns, text="▶ Iniciar", command=self.iniciar, width=10, bg="#d4edda").pack(side="left", padx=4)
+        tk.Button(btns, text="⏹ Detener", command=self.detener, width=10, bg="#f8d7da").pack(side="left", padx=4)
         tk.Button(btns, text="✉ Probar correo", command=self.probar, width=13).pack(side="left", padx=4)
 
         self.log = scrolledtext.ScrolledText(f, height=12, font=("Consolas", 9))
@@ -237,6 +244,36 @@ class App:
         except Exception as e:
             self.msg(f"Error correo: {e}")
             messagebox.showerror("Error", f"{e}\n\nUsa Clave de aplicacion de Gmail, no tu clave normal.")
+
+    def subir_nube(self):
+        """El formulario manda: escribe config_nube.json y lo sube a GitHub."""
+        import subprocess
+        self.cfg = self.leer()
+        save_config(self.cfg)
+        token = self.cfg.get("github_token", "")
+        if not token:
+            messagebox.showwarning("Falta token", "Pega tu GitHub token en el campo y pulsa Guardar primero.")
+            return
+        try:
+            umb = float(str(self.cfg.get("umbral_pct", 2)).replace(",", "."))
+        except ValueError:
+            umb = 2.0
+        nube = {"tickers": self.cfg.get("tickers", ""), "alertas": self.cfg.get("alertas", ""),
+                "umbral_pct": umb}
+        with open(NUBE_FILE, "w", encoding="utf-8") as f:
+            json.dump(nube, f, indent=2, ensure_ascii=False)
+        self.msg("Subiendo tickers a la nube...")
+        def run(*a):
+            return subprocess.run(a, cwd=BASE, capture_output=True, text=True, timeout=120)
+        run("git", "add", "config_nube.json")
+        run("git", "commit", "-m", "Actualiza alertas desde la app")
+        r = run("git", "push", f"https://jesusgomezhD:{token}@github.com/jesusgomezhD/bot-wallstreet.git", "main")
+        if r.returncode == 0:
+            self.msg("Nube actualizada. El bot 24/7 usara estos tickers.")
+            messagebox.showinfo("Nube", "Subido. La nube usara estos tickers y alertas.")
+        else:
+            self.msg(f"Error al subir: {(r.stderr or r.stdout)[-300:]}")
+            messagebox.showerror("Error", "No se pudo subir. Revisa el token.")
 
     def iniciar(self):
         if self.corriendo:

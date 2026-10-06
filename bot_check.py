@@ -8,12 +8,19 @@ def cfg(k, d=""):
     return os.environ.get(k, d)
 
 DEST = cfg("CORREO_DESTINO"); REM = cfg("GMAIL_REMITENTE"); PWD = cfg("GMAIL_CLAVE_APP")
-# Prioridad: lo que escribes en el formulario (Run workflow) > secretos fijos
-TICKERS = cfg("INPUT_TICKERS") or cfg("TICKERS", "AAPL,SPY,QQQ,EUR/USD")
-ALERTAS = cfg("INPUT_ALERTAS") or cfg("ALERTAS", "")
+# Prioridad: formulario Run workflow > archivo config_nube.json (app PC) > secretos
+import json as _json
+_arch = {}
+try:
+    with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "config_nube.json"), encoding="utf-8") as _f:
+        _arch = _json.load(_f)
+except Exception:
+    pass
+TICKERS = cfg("INPUT_TICKERS") or _arch.get("tickers") or cfg("TICKERS", "AAPL,SPY,QQQ,EUR/USD")
+ALERTAS = cfg("INPUT_ALERTAS") or _arch.get("alertas") or cfg("ALERTAS", "")
 FH = cfg("FINNHUB_KEY")
 try:
-    UMBRAL_PCT = float(cfg("INPUT_UMBRAL") or cfg("UMBRAL_PCT", "2"))
+    UMBRAL_PCT = float(cfg("INPUT_UMBRAL") or str(_arch.get("umbral_pct", "")) or cfg("UMBRAL_PCT", "2"))
 except ValueError:
     UMBRAL_PCT = 2.0
 
@@ -69,34 +76,76 @@ def parse(txt):
                 break
     return out
 
+# Estado para avisar 1 sola vez (no spam cada 5 min). En la nube se guarda en el repo.
+ESTADO_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "estado.json")
+try:
+    with open(ESTADO_FILE, encoding="utf-8") as _f:
+        ESTADO = _json.load(_f)
+except Exception:
+    ESTADO = {}
+hoy = datetime.now().strftime("%Y-%m-%d")
+if ESTADO.get("fecha") != hoy:
+    ESTADO = {"fecha": hoy, "pct": [], "precios": {}}
+
+def ya_avisado(clave, grupo):
+    return clave in ESTADO.get(grupo, [] if grupo == "pct" else {})
+
+def marcar(clave, grupo, activo=True):
+    if grupo == "pct":
+        if clave not in ESTADO["pct"]:
+            ESTADO["pct"].append(clave)
+    else:
+        ESTADO["precios"][clave] = activo
+
 ticks = [t.strip().upper() for t in TICKERS.split(",") if t.strip()]
 reglas = parse(ALERTAS)
 print(f"Check {datetime.now()} | {len(ticks)} tickers | umbral {UMBRAL_PCT}%", flush=True)
+cambios = False
 for sym in ticks:
     p, previo = obtener(sym)
     if p is None:
         print(f"{sym}=sin dato", flush=True)
         continue
     pct = round((p - previo) / previo * 100, 2) if previo else 0.0
-    marca = " 🔔" if abs(pct) >= UMBRAL_PCT else ""
+    marca = " [ALERTA]" if abs(pct) >= UMBRAL_PCT else ""
     print(f"{sym}={p} ({pct}%){marca}", flush=True)
-    # 1) Alerta automatica por % (sin poner precios): vale para los 80
-    if abs(pct) >= UMBRAL_PCT:
+    # 1) Alerta automatica por % (1 vez al dia por ticker)
+    if abs(pct) >= UMBRAL_PCT and not ya_avisado(sym, "pct"):
         try:
-            enviar(f"{'🚀' if pct > 0 else '🔻'} {sym} {pct:+}% (ahora {p})",
+            enviar(f"{'SUBE' if pct > 0 else 'BAJA'} {sym} {pct:+}% (ahora {p})",
                   f"Bot 24/7\n{sym} en {p}\nCambio del dia: {pct:+}%\nUmbral: {UMBRAL_PCT}%\n{datetime.now()}")
             print(f"ALERTA % {sym} enviada", flush=True)
+            marcar(sym, "pct"); cambios = True
         except Exception as e:
             print(f"Error correo: {e}", flush=True)
-    # 2) Reglas de precio clasicas (opcional)
+    # 2) Reglas de precio: avisa al cruzar, no cada vez
     for rs, op, meta in reglas:
         if rs != sym:
             continue
         ok = (p > meta if op == ">" else p < meta if op == "<"
               else p >= meta if op == ">=" else p <= meta)
-        if ok:
+        clave = f"{sym}{op}{meta}"
+        antes = ESTADO["precios"].get(clave, False)
+        if ok and not antes:
             try:
                 enviar(f"Alerta {sym} {op} {meta} (ahora {p})", f"Bot 24/7\n{sym} en {p}\n{sym}{op}{meta}\n{datetime.now()}")
                 print(f"ALERTA {sym} enviada", flush=True)
             except Exception as e:
                 print(f"Error correo: {e}", flush=True)
+        if ok != antes:
+            marcar(clave, "precios", ok); cambios = True
+
+with open(ESTADO_FILE, "w", encoding="utf-8") as _f:
+    _json.dump(ESTADO, _f, ensure_ascii=False)
+# En la nube: guarda el estado en el repo para no repetir avisos
+if cambios and os.environ.get("GITHUB_ACTIONS") == "true":
+    try:
+        import subprocess
+        _b = os.path.dirname(os.path.abspath(__file__))
+        subprocess.run(["git", "config", "user.email", "bot@wallstreet"], cwd=_b, timeout=30)
+        subprocess.run(["git", "config", "user.name", "bot"], cwd=_b, timeout=30)
+        subprocess.run(["git", "add", "estado.json"], cwd=_b, timeout=30)
+        subprocess.run(["git", "commit", "-m", "Actualiza estado de alertas"], cwd=_b, timeout=30)
+        subprocess.run(["git", "push", "origin", "HEAD:main"], cwd=_b, timeout=120)
+    except Exception as e:
+        print(f"No se pudo guardar estado: {e}", flush=True)
