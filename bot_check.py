@@ -7,6 +7,12 @@ from datetime import datetime
 def cfg(k, d=""):
     return os.environ.get(k, d)
 
+# Pausa de emergencia: si existe archivo PAUSADO en el repo, no envia nada
+_BASE = os.path.dirname(os.path.abspath(__file__))
+if os.path.exists(os.path.join(_BASE, "PAUSADO")):
+    print("Bot pausado por el usuario. Sin envios.", flush=True)
+    raise SystemExit(0)
+
 DEST = cfg("CORREO_DESTINO"); REM = cfg("GMAIL_REMITENTE"); PWD = cfg("GMAIL_CLAVE_APP")
 # Prioridad: formulario Run workflow > archivo config_nube.json (app PC) > secretos
 import json as _json
