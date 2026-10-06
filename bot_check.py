@@ -8,10 +8,12 @@ def cfg(k, d=""):
     return os.environ.get(k, d)
 
 DEST = cfg("CORREO_DESTINO"); REM = cfg("GMAIL_REMITENTE"); PWD = cfg("GMAIL_CLAVE_APP")
-TICKERS = cfg("TICKERS", "AAPL,SPY,QQQ,EUR/USD"); ALERTAS = cfg("ALERTAS", "AAPL>250,EUR/USD>1.10")
+# Prioridad: lo que escribes en el formulario (Run workflow) > secretos fijos
+TICKERS = cfg("INPUT_TICKERS") or cfg("TICKERS", "AAPL,SPY,QQQ,EUR/USD")
+ALERTAS = cfg("INPUT_ALERTAS") or cfg("ALERTAS", "")
 FH = cfg("FINNHUB_KEY")
 try:
-    UMBRAL_PCT = float(cfg("UMBRAL_PCT", "2"))
+    UMBRAL_PCT = float(cfg("INPUT_UMBRAL") or cfg("UMBRAL_PCT", "2"))
 except ValueError:
     UMBRAL_PCT = 2.0
 
