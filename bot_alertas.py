@@ -61,7 +61,7 @@ def parse_alertas(txt):
         part = part.strip()
         if not part:
             continue
-        for op in (">=", "<=", ">", "<"):
+        for op in ("==", ">=", "<=", ">", "<"):
             if op in part:
                 s, v = part.split(op, 1)
                 try:
@@ -125,8 +125,8 @@ class App:
         tk.Label(f, text="2) Ponle la alerta", font=("Arial", 10, "bold")).pack(anchor="w", pady=(4, 0))
         fa = tk.Frame(f)
         fa.pack(fill="x")
-        self.cond = tk.StringVar(value=">")
-        tk.OptionMenu(fa, self.cond, ">", "<", ">=", "<=").pack(side="left")
+        self.cond = tk.StringVar(value=">=")
+        tk.OptionMenu(fa, self.cond, "==", ">=", "<=", ">", "<").pack(side="left")
         tk.Label(fa, text=" precio: ").pack(side="left")
         self.precio = tk.Entry(fa, width=14)
         self.precio.pack(side="left")
@@ -138,13 +138,11 @@ class App:
         self.alertas_frame = tk.Frame(f)
         self.alertas_frame.pack(fill="x")
 
-        # Botones
+        # Botones (todo automatico: guardar/borrar/pausar sincroniza solo a la nube)
         bb = tk.Frame(f)
         bb.pack(pady=6)
-        tk.Button(bb, text="☁ Subir a nube", command=self.subir_nube,
-                  bg="#cce5ff", width=13).pack(side="left", padx=3)
         tk.Button(bb, text="📜 Historial", command=self.ver_historial, width=11).pack(side="left", padx=3)
-        tk.Button(bb, text="⏸ Pausar", command=lambda: self.pausa(True), width=9).pack(side="left", padx=3)
+        tk.Button(bb, text="⏸ Pausar todo", command=lambda: self.pausa(True), width=12).pack(side="left", padx=3)
         tk.Button(bb, text="▶ Seguir", command=lambda: self.pausa(False), width=9).pack(side="left", padx=3)
         tk.Button(bb, text="⚡ Rápido", command=self.modo_rapido, width=9).pack(side="left", padx=3)
         tk.Button(bb, text="⚙", command=self.configurar, width=3).pack(side="left", padx=3)
@@ -219,8 +217,9 @@ class App:
         self.cfg["alertas"] = ",".join(f"{s}{o}{m:g}" for s, o, m in reglas)
         save_config(self.cfg)
         self.refrescar_alertas()
-        self.msg(f"Alerta: {self.seleccionado}{self.cond.get()}{p:g}. Dale Subir a nube.")
+        self.msg(f"Alerta: {self.seleccionado}{self.cond.get()}{p:g}. Sincronizando...")
         self.precio.delete(0, "end")
+        self._auto_sync("Alerta activa 24/7")
 
     def quitar_alerta(self, idx):
         reglas = parse_alertas(self.cfg.get("alertas", ""))
@@ -229,15 +228,23 @@ class App:
             self.cfg["alertas"] = ",".join(f"{s}{o}{m:g}" for s, o, m in reglas)
             save_config(self.cfg)
             self.refrescar_alertas()
-            self.msg(f"Quitada: {fuera[0]}{fuera[1]}{fuera[2]:g}")
+            self.msg(f"Quitada: {fuera[0]}{fuera[1]}{fuera[2]:g}. Sincronizando...")
+            self._auto_sync("Alerta eliminada de la nube.")
 
     def refrescar_alertas(self):
         reglas = parse_alertas(self.cfg.get("alertas", ""))
+        est = {}
+        try:
+            d = json.load(open(os.path.join(BASE, "alertas.json"), encoding="utf-8"))
+            for a in d.get("alertas", []):
+                est[(a.get("ticker"), a.get("op"), str(a.get("precio")))] = a.get("estado", "activa")
+        except Exception:
+            pass
         for w in self.alertas_frame.winfo_children():
             w.destroy()
         grupos = {}
         for i, (s, o, m) in enumerate(reglas):
-            grupos.setdefault(s, []).append((i, f"{s}{o}{m:g}"))
+            grupos.setdefault(s, []).append((i, f"{s}{o}{m:g}", est.get((s, o, f"{m:g}"), "activa")))
         if not grupos:
             tk.Label(self.alertas_frame, text="(sin alertas con precio: solo aviso auto)",
                      fg="gray", font=("Arial", 9)).pack(anchor="w")
@@ -245,10 +252,11 @@ class App:
         for t in sorted(grupos):
             tk.Label(self.alertas_frame, text=f"[{t}]",
                      font=("Arial", 9, "bold")).pack(anchor="w")
-            for i, txt in grupos[t]:
+            for i, txt, estado in grupos[t]:
                 fila = tk.Frame(self.alertas_frame)
                 fila.pack(fill="x", padx=12)
-                tk.Label(fila, text=f"• {txt}", font=("Consolas", 9)).pack(side="left")
+                tag = " ✓" if estado == "activada" else (" ⏸" if estado == "pausada" else "")
+                tk.Label(fila, text=f"• {txt}{tag}", font=("Consolas", 9)).pack(side="left")
                 tk.Button(fila, text="Borrar alerta", fg="red",
                           command=lambda j=i: self.quitar_alerta(j)).pack(side="right")
 
@@ -344,35 +352,58 @@ class App:
                 self.msg(f"Error rapido: {e}")
                 time.sleep(15)
 
-    # ----- nube -----
+    # ----- nube (sincronizacion automatica: sin botones manuales) -----
     def _git(self, *a):
         return subprocess.run(list(a), cwd=BASE, capture_output=True, text=True, timeout=120)
 
-    def subir_nube(self):
+    def _construir_alertas_json(self):
+        """Mis reglas -> alertas.json con id/estado (conserva estados de la nube)."""
+        prev = {}
+        try:
+            d = json.load(open(os.path.join(BASE, "alertas.json"), encoding="utf-8"))
+            for a in d.get("alertas", []):
+                prev[(a.get("ticker"), a.get("op"), str(a.get("precio")))] = a
+        except Exception:
+            pass
+        reglas = parse_alertas(self.cfg.get("alertas", ""))
+        arr, i = [], 0
+        for s, o, m in reglas:
+            key = (s, o, f"{m:g}")
+            old = prev.get(key, {})
+            i += 1
+            arr.append({"id": old.get("id", f"a{i}"), "ticker": s, "op": o,
+                        "precio": f"{m:g}", "estado": old.get("estado", "activa"),
+                        "correo": old.get("correo", "")})
+        try:
+            umb = float(str(self.cfg.get("umbral_pct", 10)).replace(",", "."))
+        except ValueError:
+            umb = 10.0
+        return {"umbral_pct": umb, "correo_destino": self.cfg.get("correo_destino", ""),
+                "alertas": arr}
+
+    def _auto_sync(self, ok_msg):
+        threading.Thread(target=self._push_nube, args=(ok_msg,), daemon=True).start()
+
+    def _push_nube(self, ok_msg):
         token = self.cfg.get("github_token", "")
         if not token:
-            messagebox.showwarning("Token", "Abre ⚙ y pega tu GitHub token una vez.")
+            self.msg("Falta token en ⚙ (solo se pide una vez).")
             return
-        if not self.cfg.get("correo_destino"):
-            messagebox.showwarning("Correo", "Abre ⚙ y pon tu correo primero.")
-            return
-        ticks = sorted({s for s, _, _ in parse_alertas(self.cfg.get("alertas", ""))})
+        nube = self._construir_alertas_json()
+        json.dump(nube, open(os.path.join(BASE, "alertas.json"), "w", encoding="utf-8"),
+                  indent=2, ensure_ascii=False)
+        ticks = sorted({a["ticker"] for a in nube["alertas"]})
         base = [t.strip().upper() for t in self.cfg.get("tickers", "").split(",") if t.strip()]
-        nube = {"tickers": ",".join(sorted(set(ticks + base))) or ",".join(ticks),
-                "alertas": self.cfg.get("alertas", ""),
-                "umbral_pct": self.cfg.get("umbral_pct", 10),
-                "correo_destino": self.cfg.get("correo_destino", "")}
-        json.dump(nube, open(NUBE_FILE, "w", encoding="utf-8"), indent=2, ensure_ascii=False)
-        self.msg("Subiendo...")
-        self._git("git", "add", "config_nube.json")
-        self._git("git", "commit", "-m", "Actualiza alertas desde la app")
+        compat = {"tickers": ",".join(sorted(set(ticks + base))),
+                  "alertas": self.cfg.get("alertas", ""),
+                  "umbral_pct": nube["umbral_pct"],
+                  "correo_destino": nube["correo_destino"]}
+        json.dump(compat, open(NUBE_FILE, "w", encoding="utf-8"), indent=2, ensure_ascii=False)
+        self._git("git", "add", "alertas.json", "config_nube.json")
+        self._git("git", "commit", "-m", "Sync automatico de alertas")
         r = self._git("git", "push",
                       f"https://jesusgomezhD:{token}@github.com/jesusgomezhD/bot-wallstreet.git", "main")
-        if r.returncode == 0:
-            self.msg("Nube actualizada: avisa 24/7 con tus alertas.")
-            messagebox.showinfo("Nube", "Listo. La nube usa tus alertas.")
-        else:
-            self.msg("Error al subir. Revisa el token en ⚙.")
+        self.msg("Alerta activa 24/7." if r.returncode == 0 else "Sin conexion: reintenta.")
 
     def pausa(self, pausar):
         token = self.cfg.get("github_token", "")

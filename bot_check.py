@@ -72,7 +72,7 @@ def parse(txt):
     out = []
     for part in (txt or "").split(","):
         part = part.strip()
-        for op in (">=", "<=", ">", "<"):
+        for op in ("==", ">=", "<=", ">", "<"):
             if op in part:
                 sym, val = part.split(op, 1)
                 try:
@@ -128,7 +128,7 @@ for sym in ticks:
     for rs, op, meta in reglas:
         if rs != sym:
             continue
-        ok = (p > meta if op == ">" else p < meta if op == "<"
+        ok = (round(p, 4) == round(meta, 4) if op == "==" else p > meta if op == ">" else p < meta if op == "<"
               else p >= meta if op == ">=" else p <= meta)
         clave = f"{sym}{op}{meta}"
         antes = ESTADO["precios"].get(clave, False)
