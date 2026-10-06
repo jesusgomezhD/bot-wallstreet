@@ -10,15 +10,21 @@ def cfg(k, d=""):
 DEST = cfg("CORREO_DESTINO"); REM = cfg("GMAIL_REMITENTE"); PWD = cfg("GMAIL_CLAVE_APP")
 TICKERS = cfg("TICKERS", "AAPL,SPY,QQQ,EUR/USD"); ALERTAS = cfg("ALERTAS", "AAPL>250,EUR/USD>1.10")
 FH = cfg("FINNHUB_KEY")
+try:
+    UMBRAL_PCT = float(cfg("UMBRAL_PCT", "2"))
+except ValueError:
+    UMBRAL_PCT = 2.0
 
 def pyahoo(s):
+    """Devuelve (precio, cierre_anterior). Gratis sin clave."""
     s = s.strip().upper()
     y = s.replace("/", "") + "=X" if "/" in s else s
     if s == "EURUSD":
         y = "EURUSD=X"
     r = requests.get(f"https://query1.finance.yahoo.com/v8/finance/chart/{y}?interval=1d&range=1d",
                      headers={"User-Agent": "Mozilla/5.0"}, timeout=12)
-    return float(r.json()["chart"]["result"][0]["meta"]["regularMarketPrice"])
+    meta = r.json()["chart"]["result"][0]["meta"]
+    return float(meta["regularMarketPrice"]), float(meta.get("chartPreviousClose") or meta.get("previousClose") or 0) or None
 
 def pfinnhub(s):
     if not FH:
@@ -30,12 +36,15 @@ def pfinnhub(s):
 def obtener(s):
     for fn in (pfinnhub, pyahoo):
         try:
-            p = fn(s)
-            if p:
-                return p
+            r = fn(s)
+            if r:
+                # pfinnhub devuelve precio; pyahoo devuelve (precio, previo)
+                if isinstance(r, tuple):
+                    return r[0], r[1]
+                return r, None
         except Exception:
             pass
-    return None
+    return None, None
 
 def enviar(asunto, cuerpo):
     msg = MIMEText(cuerpo, "plain", "utf-8")
@@ -60,12 +69,24 @@ def parse(txt):
 
 ticks = [t.strip().upper() for t in TICKERS.split(",") if t.strip()]
 reglas = parse(ALERTAS)
-print(f"Check {datetime.now()} {ticks}", flush=True)
+print(f"Check {datetime.now()} | {len(ticks)} tickers | umbral {UMBRAL_PCT}%", flush=True)
 for sym in ticks:
-    p = obtener(sym)
-    print(f"{sym}={p}", flush=True)
+    p, previo = obtener(sym)
     if p is None:
+        print(f"{sym}=sin dato", flush=True)
         continue
+    pct = round((p - previo) / previo * 100, 2) if previo else 0.0
+    marca = " 🔔" if abs(pct) >= UMBRAL_PCT else ""
+    print(f"{sym}={p} ({pct}%){marca}", flush=True)
+    # 1) Alerta automatica por % (sin poner precios): vale para los 80
+    if abs(pct) >= UMBRAL_PCT:
+        try:
+            enviar(f"{'🚀' if pct > 0 else '🔻'} {sym} {pct:+}% (ahora {p})",
+                  f"Bot 24/7\n{sym} en {p}\nCambio del dia: {pct:+}%\nUmbral: {UMBRAL_PCT}%\n{datetime.now()}")
+            print(f"ALERTA % {sym} enviada", flush=True)
+        except Exception as e:
+            print(f"Error correo: {e}", flush=True)
+    # 2) Reglas de precio clasicas (opcional)
     for rs, op, meta in reglas:
         if rs != sym:
             continue
