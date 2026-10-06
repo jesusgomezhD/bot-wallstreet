@@ -17,6 +17,14 @@
       "precio": "1.12558",
       "estado": "activa",
       "correo": ""
+    },
+    {
+      "id": "a3",
+      "ticker": "EUR/USD",
+      "op": "==",
+      "precio": "1.12555",
+      "estado": "activa",
+      "correo": ""
     }
   ]
 }
