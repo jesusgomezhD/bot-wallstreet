@@ -40,6 +40,31 @@ DEFAULTS = {
 }
 
 NUBE_FILE = os.path.join(BASE, "config_nube.json")
+HIST_FILE = os.path.join(BASE, "historial.json")
+
+def guardar_historial(ticker, tipo, detalle):
+    try:
+        h = []
+        if os.path.exists(HIST_FILE):
+            with open(HIST_FILE, encoding="utf-8") as f:
+                h = json.load(f)
+        h.append({"fecha": datetime.now().strftime("%Y-%m-%d %H:%M"), "ticker": ticker,
+                  "tipo": tipo, "detalle": detalle})
+        with open(HIST_FILE, "w", encoding="utf-8") as f:
+            json.dump(h[-500:], f, indent=2, ensure_ascii=False)
+    except Exception:
+        pass
+
+def historial_agrupado():
+    grupos = {}
+    try:
+        if os.path.exists(HIST_FILE):
+            with open(HIST_FILE, encoding="utf-8") as f:
+                for e in json.load(f):
+                    grupos.setdefault(e.get("ticker", "?"), []).append(e)
+    except Exception:
+        pass
+    return grupos
 
 def load_config():
     if os.path.exists(CONFIG_FILE):
@@ -210,9 +235,62 @@ class App:
         tk.Button(btns, text="⏹ Detener", command=self.detener, width=10, bg="#f8d7da").pack(side="left", padx=4)
         tk.Button(btns, text="✉ Probar correo", command=self.probar, width=13).pack(side="left", padx=4)
 
-        self.log = scrolledtext.ScrolledText(f, height=12, font=("Consolas", 9))
+        self.log = scrolledtext.ScrolledText(f, height=10, font=("Consolas", 9))
         self.log.pack(fill="both", expand=True, pady=(6,0))
         self.msg("Listo. 1) Llena tu correo 2) Guarda 3) Inicia. Dios te guarde.")
+
+        tk.Label(f, text="Historial de mis alertas (agrupado por ticker)", font=("Arial", 10, "bold")).pack(anchor="w", pady=(6,0))
+        hb = tk.Frame(f)
+        hb.pack(fill="x")
+        tk.Button(hb, text="Ver historial", command=self.ver_historial, width=14).pack(side="left", padx=4)
+        tk.Button(hb, text="Traer nube", command=self.traer_nube, width=14).pack(side="left", padx=4)
+        self.hist = scrolledtext.ScrolledText(f, height=8, font=("Consolas", 9))
+        self.hist.pack(fill="both", expand=True)
+
+    def ver_historial(self):
+        self.cfg = self.leer()
+        self.hist.delete("1.0", "end")
+        # 1) Pedidas (del formulario), agrupadas por ticker
+        ped = {}
+        for s, op, m in parse_alertas(self.cfg.get("alertas", "")):
+            ped.setdefault(s, []).append(f"{s}{op}{m}")
+        self.hist.insert("end", "=== PEDIDAS (mi formulario) ===\n")
+        if not ped:
+            self.hist.insert("end", "(ninguna con precio; solo auto %)\n")
+        for t in sorted(ped):
+            self.hist.insert("end", f"[{t}] " + ", ".join(ped[t]) + "\n")
+        # 2) Enviadas, agrupadas por ticker
+        self.hist.insert("end", "\n=== ENVIADAS (correo) ===\n")
+        g = historial_agrupado()
+        if not g:
+            self.hist.insert("end", "(aun no se ha enviado ninguna desde esta app)\n")
+        for t in sorted(g):
+            self.hist.insert("end", f"[{t}] ({len(g[t])})\n")
+            for e in g[t][-10:]:
+                self.hist.insert("end", f"  {e['fecha']} {e['tipo']}: {e['detalle']}\n")
+
+    def traer_nube(self):
+        import subprocess
+        try:
+            r = subprocess.run(["git", "pull", "origin", "main"], cwd=BASE,
+                               capture_output=True, text=True, timeout=120)
+        except Exception as e:
+            self.msg(f"Error git pull: {e}")
+            return
+        try:
+            with open(os.path.join(BASE, "estado.json"), encoding="utf-8") as fh:
+                est = json.load(fh)
+        except Exception:
+            est = {}
+        avis = list(est.get("pct", [])) + [k for k, v in est.get("precios", {}).items() if v]
+        self.hist.delete("1.0", "end")
+        self.hist.insert("end", f"=== NUBE (avisadas {est.get('fecha', '?')}) ===\n")
+        if not avis:
+            self.hist.insert("end", "(la nube aun no avisa nada hoy)\n")
+        for a in sorted(set(avis)):
+            self.hist.insert("end", f"- {a}\n")
+            guardar_historial(a.split(">")[0].split("<")[0][:12], "nube", a)
+        self.msg("Nube traida: " + (r.stdout.strip().splitlines()[-1] if r.stdout.strip() else "ok"))
 
     def msg(self, t):
         h = datetime.now().strftime("%H:%M:%S")
@@ -313,6 +391,7 @@ class App:
                             try:
                                 enviar_correo(self.cfg, asunto, cuerpo)
                                 self.msg(f"ALERTA enviada: {asunto}")
+                                guardar_historial(sym, "precio", f"{sym}{op}{meta} -> {precio}")
                             except Exception as e:
                                 self.msg(f"No se pudo enviar correo: {e}")
                 # limpiar avisos si el precio volvio (para re-avisar luego)
