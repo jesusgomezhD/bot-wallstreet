@@ -244,6 +244,8 @@ class App:
         hb.pack(fill="x")
         tk.Button(hb, text="Ver historial", command=self.ver_historial, width=14).pack(side="left", padx=4)
         tk.Button(hb, text="Traer nube", command=self.traer_nube, width=14).pack(side="left", padx=4)
+        tk.Button(hb, text="⏸ Pausar nube", command=lambda: self.pausa_nube(True), width=14).pack(side="left", padx=4)
+        tk.Button(hb, text="▶ Reanudar nube", command=lambda: self.pausa_nube(False), width=14).pack(side="left", padx=4)
         self.hist = scrolledtext.ScrolledText(f, height=8, font=("Consolas", 9))
         self.hist.pack(fill="both", expand=True)
 
@@ -268,6 +270,31 @@ class App:
             self.hist.insert("end", f"[{t}] ({len(g[t])})\n")
             for e in g[t][-10:]:
                 self.hist.insert("end", f"  {e['fecha']} {e['tipo']}: {e['detalle']}\n")
+
+    def pausa_nube(self, pausar):
+        import subprocess
+        self.cfg = self.leer()
+        save_config(self.cfg)
+        token = self.cfg.get("github_token", "")
+        if not token:
+            messagebox.showwarning("Falta token", "El token ya esta guardado en este PC.")
+            return
+        def run(*a):
+            return subprocess.run(a, cwd=BASE, capture_output=True, text=True, timeout=120)
+        if pausar:
+            with open(os.path.join(BASE, "PAUSADO"), "w", encoding="utf-8") as f:
+                f.write("Pausado por el usuario desde la app.")
+            run("git", "add", "PAUSADO")
+            run("git", "commit", "-m", "Pausa nube")
+        else:
+            try:
+                os.remove(os.path.join(BASE, "PAUSADO"))
+            except OSError:
+                pass
+            run("git", "rm", "-q", "PAUSADO")
+            run("git", "commit", "-m", "Reanuda nube")
+        r = run("git", "push", f"https://jesusgomezhD:{token}@github.com/jesusgomezhD/bot-wallstreet.git", "main")
+        self.msg("Nube " + ("pausada." if pausar else "reanudada.") if r.returncode == 0 else "Error al cambiar estado.")
 
     def traer_nube(self):
         import subprocess
