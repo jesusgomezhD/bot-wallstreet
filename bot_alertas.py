@@ -3,7 +3,7 @@ BOT WALL STREET - App simple
 En manos de Dios. En el nombre de Jesucristo. Amen.
 Flujo: eliges ticker por grupos -> le pones alerta -> Subir a nube -> avisa 24/7.
 """
-import json, os, subprocess, smtplib
+import json, os, subprocess, smtplib, threading, time
 from email.mime.text import MIMEText
 from datetime import datetime
 
@@ -147,6 +147,7 @@ class App:
         tk.Button(bb, text="📜 Historial", command=self.ver_historial, width=11).pack(side="left", padx=3)
         tk.Button(bb, text="⏸ Pausar", command=lambda: self.pausa(True), width=9).pack(side="left", padx=3)
         tk.Button(bb, text="▶ Seguir", command=lambda: self.pausa(False), width=9).pack(side="left", padx=3)
+        tk.Button(bb, text="⚡ Rápido", command=self.modo_rapido, width=9).pack(side="left", padx=3)
         tk.Button(bb, text="⚙", command=self.configurar, width=3).pack(side="left", padx=3)
 
         self.log = scrolledtext.ScrolledText(f, height=5, font=("Consolas", 8), fg="gray")
@@ -276,6 +277,67 @@ class App:
             t.insert("end", "\n".join(f"- {a}" for a in sorted(set(avis))) or "(nada hoy)")
         except Exception as e:
             t.insert("end", f"(sin conexión a nube: {e})")
+
+    # ----- modo rapido (este PC, ~1 min) -----
+    def modo_rapido(self):
+        if getattr(self, "rapido", False):
+            self.rapido = False
+            self.msg("Modo rápido detenido.")
+            return
+        if not self.cfg.get("gmail_remitente") or not self.cfg.get("gmail_clave_app"):
+            messagebox.showwarning("Correo", "Abre ⚙ y pon tu Gmail y clave primero.")
+            return
+        self.rapido = True
+        self._avisados = set()
+        self.msg("Modo rápido: revisa cada 60s mientras la app esté abierta.")
+        threading.Thread(target=self._loop_rapido, daemon=True).start()
+
+    def _loop_rapido(self):
+        import requests as _rq
+        while getattr(self, "rapido", False):
+            try:
+                reglas = parse_alertas(self.cfg.get("alertas", ""))
+                vistos = set()
+                for sym, op, meta in reglas:
+                    y = sym.replace("/", "") + "=X" if "/" in sym else sym
+                    try:
+                        r = _rq.get(
+                            f"https://query1.finance.yahoo.com/v8/finance/chart/{y}?interval=1d&range=1d",
+                            headers={"User-Agent": "Mozilla/5.0"}, timeout=12).json()
+                        p = float(r["chart"]["result"][0]["meta"]["regularMarketPrice"])
+                    except Exception:
+                        continue
+                    ok = (p > meta if op == ">" else p < meta if op == "<"
+                          else p >= meta if op == ">=" else p <= meta)
+                    clave = f"{sym}{op}{meta}"
+                    vistos.add((clave, ok))
+                    if ok and clave not in self._avisados:
+                        self._avisados.add(clave)
+                        try:
+                            m = MIMEText(f"Rapido\n{sym} en {p}\n{sym}{op}{meta}\n{datetime.now()}",
+                                         "plain", "utf-8")
+                            m["Subject"] = f"Alerta {sym} {op} {meta} (ahora {p})"
+                            m["From"] = self.cfg["gmail_remitente"]
+                            m["To"] = self.cfg["correo_destino"]
+                            s = smtplib.SMTP("smtp.gmail.com", 587, timeout=20)
+                            s.starttls()
+                            s.login(self.cfg["gmail_remitente"], self.cfg["gmail_clave_app"])
+                            s.sendmail(self.cfg["gmail_remitente"],
+                                       [self.cfg["correo_destino"]], m.as_string())
+                            try:
+                                s.quit()
+                            except Exception:
+                                pass
+                            self.msg(f"RAPIDA enviada: {sym} {p}")
+                            guardar_historial(sym, "rapida", f"{sym}{op}{meta} -> {p}")
+                        except Exception as e:
+                            self.msg(f"Error correo: {e}")
+                # solo recuerda las que siguen cumplidas (re-avisa si vuelve a cruzar)
+                self._avisados = {c for c, ok in vistos if ok}
+                time.sleep(60)
+            except Exception as e:
+                self.msg(f"Error rapido: {e}")
+                time.sleep(15)
 
     # ----- nube -----
     def _git(self, *a):
