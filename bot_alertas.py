@@ -182,7 +182,23 @@ class App:
         if not sel or sel[0] >= len(g["mostrados"]):
             return
         self.seleccionado = _sim(g["mostrados"][sel[0]])
-        self.sel_label.config(text=f"Seleccionado: {self.seleccionado}")
+        self.sel_label.config(text=f"Seleccionado: {self.seleccionado} (buscando precio...)")
+        import threading
+        threading.Thread(target=self._precio_actual, args=(self.seleccionado,),
+                         daemon=True).start()
+
+    def _precio_actual(self, sym):
+        try:
+            y = sym.replace("/", "") + "=X" if "/" in sym else sym
+            r = requests.get(
+                f"https://query1.finance.yahoo.com/v8/finance/chart/{y}?interval=1d&range=1d",
+                headers={"User-Agent": "Mozilla/5.0"}, timeout=12).json()
+            p = float(r["chart"]["result"][0]["meta"]["regularMarketPrice"])
+            if sym == self.seleccionado:
+                self.sel_label.config(text=f"Seleccionado: {sym} (ahora {p})")
+        except Exception:
+            if sym == self.seleccionado:
+                self.sel_label.config(text=f"Seleccionado: {sym}")
 
     # ----- alertas -----
     def agregar_alerta(self):
