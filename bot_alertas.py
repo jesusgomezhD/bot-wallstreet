@@ -124,8 +124,17 @@ class App:
         self.cfg = load_config()
         self.seleccionado = None
 
-        f = tk.Frame(root, padx=14, pady=10)
-        f.pack(fill="both", expand=True)
+        canvas = tk.Canvas(root)
+        vbar = tk.Scrollbar(root, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=vbar.set)
+        vbar.pack(side="right", fill="y")
+        canvas.pack(side="left", fill="both", expand=True)
+        f = tk.Frame(canvas, padx=14, pady=10)
+        canvas.create_window((0, 0), window=f, anchor="nw")
+        f.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        def _rueda(e):
+            canvas.yview_scroll(int(-1 * (e.delta / 120)), "units")
+        canvas.bind_all("<MouseWheel>", _rueda)
 
         tk.Label(f, text="BOT WALL STREET", font=("Arial", 14, "bold")).pack()
         tk.Label(f, text="Elige ticker, ponle alerta, súbelo. La nube avisa 24/7.",
@@ -145,10 +154,13 @@ class App:
             s.pack(fill="x")
             s.bind("<KeyRelease>", lambda e, n=nombre: self._filtrar(n))
             self._grupos[nombre]["busc"] = s
-            lb = tk.Listbox(box, height=5, exportselection=False)
+            lb = tk.Listbox(box, selectmode="single", height=8, exportselection=False)
+            lbar = tk.Scrollbar(box, orient="vertical", command=lb.yview)
+            lb.configure(yscrollcommand=lbar.set)
+            lbar.pack(side="right", fill="y")
             for it in items:
                 lb.insert("end", _txt(it))
-            lb.pack(fill="x")
+            lb.pack(side="left", fill="x", expand=True)
             lb.bind("<<ListboxSelect>>", lambda e, n=nombre: self._elegir(n))
             self._grupos[nombre]["lista"] = lb
 
