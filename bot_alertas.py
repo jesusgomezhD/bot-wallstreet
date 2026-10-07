@@ -72,27 +72,38 @@ def parse_alertas(txt):
                 break
     return out
 
-def _precio_rt(sym, rq, finnhub_key):
-    """Tiempo real: Finnhub primero, Yahoo de respaldo. Devuelve precio o None."""
+def _precio_rt(sym, rq, finnhub_key, twelve_key=""):
+    """Tiempo real: Finnhub > TwelveData > Yahoo. Devuelve (precio, fuente)."""
+    s = sym.strip().upper()
     fk = (finnhub_key or "").strip()
     if fk:
         try:
-            fs = "OANDA:EUR_USD" if "EUR" in sym.upper() else sym.strip().upper()
+            fs = "OANDA:EUR_USD" if "EUR" in s else s
             r = rq.get(f"https://finnhub.io/api/v1/quote?symbol={fs}&token={fk}",
                        timeout=10).json()
-            return float(r.get("c") or 0) or None
+            p = float(r.get("c") or 0)
+            if p:
+                return p, "Finnhub"
+        except Exception:
+            pass
+    tk_ = (twelve_key or "").strip()
+    if tk_:
+        try:
+            r = rq.get(f"https://api.twelvedata.com/price?symbol={s}&apikey={tk_}",
+                       timeout=10).json()
+            if r.get("price"):
+                return float(r["price"]), "Twelve"
         except Exception:
             pass
     try:
-        s = sym.strip().upper()
         y = (s.replace("/", "") + "=X") if "/" in s else s
         if s == "EURUSD":
             y = "EURUSD=X"
         r = rq.get(f"https://query1.finance.yahoo.com/v8/finance/chart/{y}?interval=1d&range=1d",
                    headers={"User-Agent": "Mozilla/5.0"}, timeout=12).json()
-        return float(r["chart"]["result"][0]["meta"]["regularMarketPrice"])
+        return float(r["chart"]["result"][0]["meta"]["regularMarketPrice"]), "Yahoo"
     except Exception:
-        return None
+        return None, None
 
 
 def guardar_historial(ticker, tipo, detalle):
@@ -211,32 +222,9 @@ class App:
 
     def precio_vivo(self, sym):
         """Finnhub > TwelveData > Yahoo. Devuelve (precio, fuente)."""
-        s = sym.strip().upper()
-        fk = (self.cfg.get("finnhub_key", "") or "").strip()
-        if fk:
-            try:
-                fs = "OANDA:EUR_USD" if "EUR" in s else s
-                r = requests.get(f"https://finnhub.io/api/v1/quote?symbol={fs}&token={fk}",
-                                 timeout=10).json()
-                p = float(r.get("c") or 0)
-                if p:
-                    return p, "Finnhub"
-            except Exception:
-                pass
-        tk_ = (self.cfg.get("twelvedata_key", "") or "").strip()
-        if tk_:
-            try:
-                r = requests.get(f"https://api.twelvedata.com/price?symbol={s}&apikey={tk_}",
-                                 timeout=10).json()
-                if r.get("price"):
-                    return float(r["price"]), "Twelve"
-            except Exception:
-                pass
-        y = s.replace("/", "") + "=X" if "/" in s else s
-        r = requests.get(
-            f"https://query1.finance.yahoo.com/v8/finance/chart/{y}?interval=1d&range=1d",
-            headers={"User-Agent": "Mozilla/5.0"}, timeout=12).json()
-        return float(r["chart"]["result"][0]["meta"]["regularMarketPrice"]), "Yahoo"
+        import requests as _rq
+        return _precio_rt(sym, _rq, self.cfg.get("finnhub_key", ""),
+                          self.cfg.get("twelvedata_key", ""))
 
     def _precio_actual(self, sym):
         try:
@@ -361,7 +349,8 @@ class App:
                 reglas = parse_alertas(self.cfg.get("alertas", ""))
                 vistos = set()
                 for sym, op, meta in reglas:
-                    p = _precio_rt(sym, _rq, self.cfg.get("finnhub_key", ""))
+                    p, _fuente = _precio_rt(sym, _rq, self.cfg.get("finnhub_key", ""),
+                                            self.cfg.get("twelvedata_key", ""))
                     if p is None:
                         continue
                     ok = (round(p, 4) == round(meta, 4) if op == "==" else p > meta if op == ">" else p < meta if op == "<"
@@ -482,6 +471,8 @@ class App:
                 ("gmail_remitente", "Gmail que envía:", ""),
                 ("gmail_clave_app", "Clave de aplicación Gmail:", "*"),
                 ("umbral_pct", "Aviso auto si se mueve % en el día:", ""),
+                ("finnhub_key", "Finnhub key gratis (vivo):", ""),
+                ("twelvedata_key", "TwelveData key gratis (vivo):", ""),
                 ("github_token", "GitHub token:", "*")]:
             tk.Label(top, text=label, font=("Arial", 9, "bold")).pack(anchor="w", padx=10)
             e = tk.Entry(top, width=55, show=show)

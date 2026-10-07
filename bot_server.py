@@ -17,6 +17,7 @@ REM = os.environ.get("GMAIL_REMITENTE", "")
 PWD = os.environ.get("GMAIL_CLAVE_APP", "")
 TOKEN = os.environ.get("GH_TOKEN", "")
 FH = os.environ.get("FINNHUB_KEY", "")
+TD = os.environ.get("TWELVEDATA_KEY", "")
 RAW = f"https://raw.githubusercontent.com/{REPO}/main"
 API = f"https://api.github.com/repos/{REPO}/contents"
 
@@ -70,8 +71,16 @@ def precio_finnhub(sym):
     c = r.json().get("c")
     return (float(c), None) if c else None
 
+def precio_twelve(sym):
+    if not TD:
+        return None
+    r = requests.get(f"https://api.twelvedata.com/price?symbol={sym.strip().upper()}&apikey={TD}",
+                     timeout=10)
+    j = r.json()
+    return (float(j["price"]), None) if j.get("price") else None
+
 def obtener(sym):
-    for fn in (precio_finnhub, precio_yahoo):
+    for fn in (precio_finnhub, precio_twelve, precio_yahoo):
         try:
             r = fn(sym)
             if r and r[0]:
