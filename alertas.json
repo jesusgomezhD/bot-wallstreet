@@ -41,6 +41,14 @@
       "precio": "372",
       "estado": "activa",
       "correo": ""
+    },
+    {
+      "id": "a6",
+      "ticker": "SPCX",
+      "op": "<=",
+      "precio": "167",
+      "estado": "activa",
+      "correo": ""
     }
   ]
 }
