@@ -41,6 +41,14 @@
       "precio": "644.5",
       "estado": "activa",
       "correo": ""
+    },
+    {
+      "id": "a6",
+      "ticker": "TSLA",
+      "op": "<=",
+      "precio": "372",
+      "estado": "activa",
+      "correo": ""
     }
   ]
 }
