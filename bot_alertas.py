@@ -180,10 +180,17 @@ class App:
         tk.Button(fa, text="+ Agregar alerta", command=self.agregar_alerta,
                   bg="#d4edda").pack(side="left", padx=6)
 
-        # 3) Mis alertas (activas: cada una con su boton borrar)
+        # 3) Mis alertas activas (con scroll)
         tk.Label(f, text="3) Mis alertas activas", font=("Arial", 10, "bold")).pack(anchor="w", pady=(4, 0))
-        self.alertas_frame = tk.Frame(f)
-        self.alertas_frame.pack(fill="x")
+        acanvas = tk.Canvas(f, height=130)
+        abar = tk.Scrollbar(f, orient="vertical", command=acanvas.yview)
+        acanvas.configure(yscrollcommand=abar.set)
+        abar.pack(side="right", fill="y")
+        acanvas.pack(fill="x")
+        self.alertas_frame = tk.Frame(acanvas)
+        acanvas.create_window((0, 0), window=self.alertas_frame, anchor="nw")
+        self.alertas_frame.bind("<Configure>",
+                                lambda e: acanvas.configure(scrollregion=acanvas.bbox("all")))
 
         # Botones (todo automatico: guardar/borrar/pausar sincroniza solo a la nube)
         bb = tk.Frame(f)
