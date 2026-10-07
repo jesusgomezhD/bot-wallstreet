@@ -18,6 +18,7 @@ HIST_FILE = os.path.join(BASE, "historial.json")
 
 DEFAULTS = {"correo_destino": "", "gmail_remitente": "", "gmail_clave_app": "",
             "alertas": "", "umbral_pct": 10, "github_token": "",
+            "finnhub_key": "", "twelvedata_key": "",
             "tickers": ""}
 
 GRUPOS = [
@@ -70,6 +71,29 @@ def parse_alertas(txt):
                     pass
                 break
     return out
+
+def _precio_rt(sym, rq, finnhub_key):
+    """Tiempo real: Finnhub primero, Yahoo de respaldo. Devuelve precio o None."""
+    fk = (finnhub_key or "").strip()
+    if fk:
+        try:
+            fs = "OANDA:EUR_USD" if "EUR" in sym.upper() else sym.strip().upper()
+            r = rq.get(f"https://finnhub.io/api/v1/quote?symbol={fs}&token={fk}",
+                       timeout=10).json()
+            return float(r.get("c") or 0) or None
+        except Exception:
+            pass
+    try:
+        s = sym.strip().upper()
+        y = (s.replace("/", "") + "=X") if "/" in s else s
+        if s == "EURUSD":
+            y = "EURUSD=X"
+        r = rq.get(f"https://query1.finance.yahoo.com/v8/finance/chart/{y}?interval=1d&range=1d",
+                   headers={"User-Agent": "Mozilla/5.0"}, timeout=12).json()
+        return float(r["chart"]["result"][0]["meta"]["regularMarketPrice"])
+    except Exception:
+        return None
+
 
 def guardar_historial(ticker, tipo, detalle):
     try:
@@ -185,15 +209,40 @@ class App:
         threading.Thread(target=self._precio_actual, args=(self.seleccionado,),
                          daemon=True).start()
 
+    def precio_vivo(self, sym):
+        """Finnhub > TwelveData > Yahoo. Devuelve (precio, fuente)."""
+        s = sym.strip().upper()
+        fk = (self.cfg.get("finnhub_key", "") or "").strip()
+        if fk:
+            try:
+                fs = "OANDA:EUR_USD" if "EUR" in s else s
+                r = requests.get(f"https://finnhub.io/api/v1/quote?symbol={fs}&token={fk}",
+                                 timeout=10).json()
+                p = float(r.get("c") or 0)
+                if p:
+                    return p, "Finnhub"
+            except Exception:
+                pass
+        tk_ = (self.cfg.get("twelvedata_key", "") or "").strip()
+        if tk_:
+            try:
+                r = requests.get(f"https://api.twelvedata.com/price?symbol={s}&apikey={tk_}",
+                                 timeout=10).json()
+                if r.get("price"):
+                    return float(r["price"]), "Twelve"
+            except Exception:
+                pass
+        y = s.replace("/", "") + "=X" if "/" in s else s
+        r = requests.get(
+            f"https://query1.finance.yahoo.com/v8/finance/chart/{y}?interval=1d&range=1d",
+            headers={"User-Agent": "Mozilla/5.0"}, timeout=12).json()
+        return float(r["chart"]["result"][0]["meta"]["regularMarketPrice"]), "Yahoo"
+
     def _precio_actual(self, sym):
         try:
-            y = sym.replace("/", "") + "=X" if "/" in sym else sym
-            r = requests.get(
-                f"https://query1.finance.yahoo.com/v8/finance/chart/{y}?interval=1d&range=1d",
-                headers={"User-Agent": "Mozilla/5.0"}, timeout=12).json()
-            p = float(r["chart"]["result"][0]["meta"]["regularMarketPrice"])
+            p, fuente = self.precio_vivo(sym)
             if sym == self.seleccionado:
-                self.sel_label.config(text=f"Seleccionado: {sym} (ahora {p})")
+                self.sel_label.config(text=f"Seleccionado: {sym} (ahora {p} · {fuente})")
         except Exception:
             if sym == self.seleccionado:
                 self.sel_label.config(text=f"Seleccionado: {sym}")
@@ -312,15 +361,10 @@ class App:
                 reglas = parse_alertas(self.cfg.get("alertas", ""))
                 vistos = set()
                 for sym, op, meta in reglas:
-                    y = sym.replace("/", "") + "=X" if "/" in sym else sym
-                    try:
-                        r = _rq.get(
-                            f"https://query1.finance.yahoo.com/v8/finance/chart/{y}?interval=1d&range=1d",
-                            headers={"User-Agent": "Mozilla/5.0"}, timeout=12).json()
-                        p = float(r["chart"]["result"][0]["meta"]["regularMarketPrice"])
-                    except Exception:
+                    p = _precio_rt(sym, _rq, self.cfg.get("finnhub_key", ""))
+                    if p is None:
                         continue
-                    ok = (p > meta if op == ">" else p < meta if op == "<"
+                    ok = (round(p, 4) == round(meta, 4) if op == "==" else p > meta if op == ">" else p < meta if op == "<"
                           else p >= meta if op == ">=" else p <= meta)
                     clave = f"{sym}{op}{meta}"
                     vistos.add((clave, ok))
@@ -397,7 +441,8 @@ class App:
         compat = {"tickers": ",".join(sorted(set(ticks + base))),
                   "alertas": self.cfg.get("alertas", ""),
                   "umbral_pct": nube["umbral_pct"],
-                  "correo_destino": nube["correo_destino"]}
+                  "correo_destino": nube["correo_destino"],
+                  "finnhub_key": self.cfg.get("finnhub_key", "")}
         json.dump(compat, open(NUBE_FILE, "w", encoding="utf-8"), indent=2, ensure_ascii=False)
         self._git("git", "add", "alertas.json", "config_nube.json")
         self._git("git", "commit", "-m", "Sync automatico de alertas")

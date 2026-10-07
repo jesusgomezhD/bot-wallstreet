@@ -25,6 +25,7 @@ except Exception:
 TICKERS = cfg("INPUT_TICKERS") or _arch.get("tickers") or cfg("TICKERS", "AAPL,SPY,QQQ,EUR/USD")
 ALERTAS = cfg("INPUT_ALERTAS") or _arch.get("alertas") or cfg("ALERTAS", "")
 FH = cfg("FINNHUB_KEY")
+TD = cfg("TWELVEDATA_KEY") or _arch.get("finnhub_key", "")
 try:
     UMBRAL_PCT = float(cfg("INPUT_UMBRAL") or str(_arch.get("umbral_pct", "")) or cfg("UMBRAL_PCT", "2"))
 except ValueError:
@@ -48,8 +49,17 @@ def pfinnhub(s):
     r = requests.get(f"https://finnhub.io/api/v1/quote?symbol={sym}&token={FH}", timeout=10)
     return float(r.json().get("c") or 0) or None
 
+def ptwelvedata(s):
+    """Tiempo real (1 min). Gratis con key."""
+    if not TD:
+        return None
+    r = requests.get(f"https://api.twelvedata.com/price?symbol={s.strip().upper()}&apikey={TD}",
+                     timeout=10)
+    j = r.json()
+    return (float(j["price"]), None) if j.get("price") else None
+
 def obtener(s):
-    for fn in (pfinnhub, pyahoo):
+    for fn in (pfinnhub, ptwelvedata, pyahoo):
         try:
             r = fn(s)
             if r:
