@@ -33,6 +33,14 @@
       "precio": "928",
       "estado": "activa",
       "correo": ""
+    },
+    {
+      "id": "a5",
+      "ticker": "COST",
+      "op": "<=",
+      "precio": "644.5",
+      "estado": "activa",
+      "correo": ""
     }
   ]
 }
