@@ -1,5 +1,14 @@
 {
   "umbral_pct": 10.0,
   "correo_destino": "alertasactivosvalores@gmail.com",
-  "alertas": []
+  "alertas": [
+    {
+      "id": "a1",
+      "ticker": "EUR/USD",
+      "op": "<=",
+      "precio": "1.12488",
+      "estado": "activa",
+      "correo": ""
+    }
+  ]
 }
