@@ -17,6 +17,14 @@
       "precio": "1.12498",
       "estado": "activa",
       "correo": ""
+    },
+    {
+      "id": "a3",
+      "ticker": "SPY",
+      "op": "<=",
+      "precio": "775.4",
+      "estado": "activa",
+      "correo": ""
     }
   ]
 }
