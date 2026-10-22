@@ -1,1 +1,1 @@
-{"fecha": "2026-10-22", "pct": [], "precios": {"AMD<=644.5": true, "EUR/USD<=1.12488": true, "SPCX<=167.0": true, "SPY<=775.4": true, "EUR/USD>=1.12458": false}}
+{"fecha": "2026-10-22", "pct": ["MRNA"], "precios": {"AMD<=644.5": true, "EUR/USD<=1.12488": true, "SPCX<=167.0": true, "SPY<=775.4": true, "EUR/USD>=1.12458": false}}
