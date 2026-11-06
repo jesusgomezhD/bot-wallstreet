@@ -1,1 +1,1 @@
-{"fecha": "2026-11-05", "pct": ["APP", "MRNA", "AMD", "ARM", "DELL", "MELI", "MU", "TSLA"], "precios": {"AMD<=644.5": true, "EUR/USD>=1.12458": false, "SPCX<=167.0": true, "SPY<=775.4": true, "EUR/USD<=1.12488": true, "TSLA<=372.0": true}}
+{"fecha": "2026-11-06", "pct": ["AMD", "ANET", "APP", "ARM", "AVGO", "DELL", "INTC", "MELI", "MU", "TSLA", "TXN"], "precios": {"AMD<=644.5": true, "EUR/USD<=1.12488": true, "SPCX<=167.0": true, "SPY<=775.4": true, "TSLA<=372.0": true}}
